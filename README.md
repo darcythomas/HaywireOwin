@@ -8,18 +8,18 @@ Currently very expermental.
 Just proving technologies (in the C# side) at this stage 
 
 
-==Project Goals:==
+###Project Goals:
 
-=Standards:=
+#####Standards:
 Implement the full Owin 1.0 specification.
 Pass all Owin 1.0 specification unit test
 
-=Performance:=
+#####Performance:
 Will only add a 20% overhead above the haywire benchmarks
 
-=Cross platform:=
+#####Cross platform:
 Will work cross platform (*nix win osx)
 
 
-=Simple to use:=
+#####Simple to use:
 Painless deployment / instalation etc
