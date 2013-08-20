@@ -22,4 +22,4 @@ Will work cross platform (*nix win osx)
 
 
 #####Simple to use:
-Painless deployment / instalation etc
+Painless deployment / installation etc
