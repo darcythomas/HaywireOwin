@@ -41,6 +41,7 @@
   <ItemGroup>
     <Compile Include="EventProcessor.cs" />
     <Compile Include="HaywireBridge.cs" />
+    <Compile Include="IHayWireBridge.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

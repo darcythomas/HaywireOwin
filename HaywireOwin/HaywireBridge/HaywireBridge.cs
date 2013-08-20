@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
+using System.Reflection;
 using System.Security.AccessControl;
 using System.Text;
 using System.Threading.Tasks;
@@ -21,11 +22,13 @@ namespace MemoryMapBridgeProxy
         PerformanceTest = 3
     }
 
-    public class HaywireBridge : IDisposable
+   
+
+    public class HaywireBridge : IHaywireBridge
     {
         //TODO: Look at using the fullnamespac.classname.version as the mutex string
         private const String SystemWideMutexName = "HaywireMemoryMappedFileSetupMutex";
-        private const string DefaultMemorymappedFileName = "HaywireBridgeMemoryMap";
+        public  static readonly string DefaultMemorymappedFileName = "HaywireBridgeMemoryMap";
         private static readonly Mutex MemoryMapsetupMutex = new Mutex(false, SystemWideMutexName);
         private readonly ConcurrentQueue<EventCaller> _eventsToSendQueue = new ConcurrentQueue<EventCaller>();
         private ConcurrentQueue<Object> _eventsRecievedQueue = new ConcurrentQueue<Object>();
@@ -70,9 +73,9 @@ namespace MemoryMapBridgeProxy
                 MemoryMappedFileRights.FullControl, AccessControlType.Allow));
         }
 
-        private void SetMemoryMappedFileName(string fileName)
+        private void SetMemoryMappedFileName(String fileName)
         {
-            FileName = fileName ?? DefaultMemorymappedFileName;
+            FileName =  String.IsNullOrWhiteSpace(fileName)? DefaultMemorymappedFileName : fileName;
         }
 
         private void SetupMemoryMappedFiles(MemoryMappedFileSecurity customSecurity)
@@ -126,7 +129,7 @@ namespace MemoryMapBridgeProxy
                     processEventDelegate = this.DebugProcessIncomingEvent;
                     break;
                 case HaywireStartUpMode.PerformanceTest:
-                    processEventDelegate = this.PerformanceRestProcessIncomingEvent;
+                    processEventDelegate = this.PerformanceTestProcessIncomingEvent;
                     break;
             }
 
@@ -137,7 +140,7 @@ namespace MemoryMapBridgeProxy
             throw new NotImplementedException();
         }
 
-        private void PerformanceRestProcessIncomingEvent(EventCaller obj)
+        private void PerformanceTestProcessIncomingEvent(EventCaller obj)
         {
             //Do Nothing
         }
@@ -153,14 +156,15 @@ namespace MemoryMapBridgeProxy
 
         public void AddToQueue(int item)
         {
-            RaiseEvent(item);
+            
+            EventCaller eventItem = new EventCaller { Length = 0, MessageCounter = item, MessageType = 1, OffsetPosition = 4 * 4 };
+
+            _eventsToSendQueue.Enqueue(eventItem);
         }
 
         public void RaiseEvent(int request)
         {
-            EventCaller eventItem = new EventCaller { Length = 0, MessageCounter = request, MessageType = 1, OffsetPosition = 4 * 4 };
-
-            _eventsToSendQueue.Enqueue(eventItem);
+            AddToQueue(request);
         }
         public void SubscribeToEvent(Action request)
         {
@@ -231,7 +235,7 @@ namespace MemoryMapBridgeProxy
             Console.WriteLine(q.MessageCounter);
         }
 
-        void StartEventspinners()
+       private void StartEventspinners()
         {
             _eventSpinnerThreadIn = new Thread(EventspinnerIn);
             _eventSpinnerThreadIn.Start();
@@ -249,7 +253,10 @@ namespace MemoryMapBridgeProxy
         }
 
 
-
+        public Version Version()
+        {
+            return new Version(  MethodInfo.GetCurrentMethod().DeclaringType.Assembly.ImageRuntimeVersion.TrimStart('v'));
+        }
 
 
 

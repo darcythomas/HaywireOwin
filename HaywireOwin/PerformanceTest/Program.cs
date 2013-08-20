@@ -13,8 +13,10 @@ namespace TestPerformance
     {
         static void Main(string[] args)
         {
-            PerformanceTest test = new PerformanceTest();
-            test.RunTest();
+            using (PerformanceTestCoordinator test = new PerformanceTestCoordinator())
+            {
+                test.RunTests();
+            }
         }
 
 
