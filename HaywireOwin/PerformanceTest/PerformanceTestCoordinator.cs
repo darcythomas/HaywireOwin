@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.Composition;
+using System.ComponentModel.Composition.Hosting;
 using System.Diagnostics;
 using System.Diagnostics.Eventing;
 using System.Globalization;
@@ -9,68 +11,127 @@ using System.Net.Configuration;
 using System.Text;
 using System.Threading.Tasks;
 using MemoryMapBridgeProxy;
+using Newtonsoft.Json;
 
 namespace TestPerformance
 {
-  public  class PerformanceTestCoordinator: IDisposable
+    [Export]
+    public class PerformanceTestCoordinator : IDisposable
     {
 
-      public IHaywireBridge Bridge { get; private set; }
-      private Process _minionProcess;
-      private const string FileName = "PerformanceTest";
+        public IHaywireBridge Bridge { get; private set; }
+        private Process _minionProcess;
+        private readonly string _logFileName = @"..\..\TestResults\";
+        private readonly String suffix ="-TestResults.txt";
+        private const string FileName = "PerformanceTest";
 
-      public  PerformanceTestCoordinator()
-      {
-          Bridge = new HaywireBridge(FileName, HaywireStartUpMode.PerformanceTest);
-      }
-
-    //public PerformanceTestCoordinator(IHaywireBridge bridge)
-    //{
-    //    Bridge = bridge;
-    //}
-      
-     
-
-      public void RunTests()
-      {
-          StartOtherSideOfTheBridge();
-
-          TestOneMillion test = new TestOneMillion();
+        [ImportMany(typeof(IPerformanceTest))]
+       IEnumerable<IPerformanceTest> performanceTests { get; set; }
 
 
-          //get ineumenab of Itests. use MEF?
-         TestResult result =  test.RunTest(Bridge);
+        public PerformanceTestCoordinator()
+        {
+            Bridge = new HaywireBridge(FileName, HaywireStartUpMode.PerformanceTest);
 
 
-         File.AppendAllLines(@"..\..\TestResults\TestResults.txt", new [] { result.ToJson()});
-          Console.WriteLine(    result.ToString());
+            AggregateCatalog catalog = new AggregateCatalog();
 
-          Console.ReadLine();
+            AssemblyCatalog assemblyCatalog = new AssemblyCatalog(typeof(Program).Assembly);
+          //  DirectoryCatalog directoryCatalog = new DirectoryCatalog(".", "Library*.dll");
+          //  catalog.Catalogs.Add(directoryCatalog);
+            catalog.Catalogs.Add(assemblyCatalog);
 
-          //run each test in turn returning Iresult
-          //Write tests to log file
-      }
+            this.Container = new CompositionContainer(catalog);
 
-      private void StartOtherSideOfTheBridge()
-      {
-          String args = String.Format("{0} {1}", FileName, HaywireStartUpMode.PerformanceTest);
-          _minionProcess = Process.Start(@"..\..\..\MinionTestApp\bin\Debug\Minion.exe", args);
-      }
+            //CompositionBatch batch = new CompositionBatch();
+            //batch.AddExportedValue(this.Container);
 
+           // this.Container.Compose(batch);
+            this.Container.ComposeParts(this);
 
-      public void Dispose()
-      {
-          if (Bridge != null)
-          {
-              Bridge.Dispose();
-          }
+        }
+
+        public CompositionContainer Container { get; set; }
+
+        //public PerformanceTestCoordinator(IHaywireBridge bridge)
+        //{
+        //    Bridge = bridge;
+        //}
 
 
 
-          if (_minionProcess != null && !_minionProcess.HasExited)
-          {
-              _minionProcess.Kill();
-          }
-      }
+        public void RunTests()
+        {
+            StartOtherSideOfTheBridge();
+
+            //var q = performanceTests.Value;
+            foreach (var performanceTest in performanceTests)
+            {
+                var q = Enumerable.Range(0, 10).Select(s => performanceTest.RunTest(Bridge)).ToList();
+                TestResult result =  q.First();
+                result.TimeTaken = new TimeSpan(Convert.ToInt64( q.Average(a => a.TimeTaken.Ticks)));
+                //result.TimeTaken = new TimeSpan(Convert.ToInt64(q.Average(a => a.TimeTaken.Ticks)));
+               // TestResult result = performanceTest.RunTest(Bridge);
+
+                IncludeLastRunsData(result);
+                WriteToHeadOfLogFile(result);
+
+                Console.WriteLine(result.ToString());
+                foreach (var testResult in q)
+                {
+                    Console.WriteLine(testResult);
+                }
+            }
+           
+
+          
+
+
+            Console.ReadLine();
+        }
+
+        private void IncludeLastRunsData(TestResult result)
+        {
+            File.Open(_logFileName + result.TestName + suffix,FileMode.OpenOrCreate).Dispose();
+            var lastRun = JsonConvert.DeserializeObject<TestResult>(File.ReadLines(_logFileName+ result.TestName + suffix).FirstOrDefault()??String.Empty);
+            if (lastRun != null)
+            {
+                result.LastRun = lastRun.TransactionsPerSecond;
+            }
+        }
+
+        private void WriteToHeadOfLogFile(TestResult result)
+        {
+            IEnumerable<String> latestResult = new[] { result.ToJson() };
+
+            String logFileName = _logFileName + result.TestName + suffix;
+
+            IEnumerable<String> currentRows = File.ReadLines(logFileName);
+            IEnumerable<String> results = latestResult.Concat(currentRows);
+            File.AppendAllLines(logFileName  + ".new", results);
+            File.Replace(logFileName + ".new", logFileName, logFileName + ".old");
+            File.Delete(logFileName + ".old");
+            File.Delete(logFileName + ".new");
+        }
+
+        private void StartOtherSideOfTheBridge()
+        {
+            String args = String.Format("{0} {1}", FileName, HaywireStartUpMode.PerformanceTest);
+            _minionProcess = Process.Start(@"..\..\..\MinionTestApp\bin\Debug\Minion.exe", args);
+        }
+
+
+        public void Dispose()
+        {
+            if (Bridge != null)
+            {
+                Bridge.Dispose();
+            }
+
+            if (_minionProcess != null && !_minionProcess.HasExited)
+            {
+                _minionProcess.Kill();
+            }
+        }
     }
 }

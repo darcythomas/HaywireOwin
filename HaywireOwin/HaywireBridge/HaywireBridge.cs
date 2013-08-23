@@ -255,7 +255,7 @@ namespace MemoryMapBridgeProxy
 
         public Version Version()
         {
-            return new Version(  MethodInfo.GetCurrentMethod().DeclaringType.Assembly.ImageRuntimeVersion.TrimStart('v'));
+            return MethodInfo.GetCurrentMethod().DeclaringType.Assembly.GetName().Version;
         }
 
 

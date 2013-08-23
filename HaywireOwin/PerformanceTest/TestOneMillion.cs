@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.Composition;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
@@ -9,7 +10,8 @@ using MemoryMapBridgeProxy;
 
 namespace TestPerformance
 {
-   public class TestOneMillion
+    [Export(typeof(IPerformanceTest))]
+   public class TestOneMillion : IPerformanceTest
    {
        public TestResult RunTest(IHaywireBridge sender)
        {
