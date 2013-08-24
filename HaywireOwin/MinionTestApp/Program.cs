@@ -27,7 +27,7 @@ namespace Minion
             {
                 try
                 {
-                    Console.WriteLine("Minion Runner Started running HaywireBridge version {0}", hb1.Version());
+                    Console.WriteLine("Minion Runner Started running HaywireBridge version {0}", hb1.Version);
 
                     //Mutex used to close minion app when a parent debug app is closed
                     shutDownSynchMutex.WaitOne();

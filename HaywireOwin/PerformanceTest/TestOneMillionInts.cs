@@ -11,21 +11,19 @@ using MemoryMapBridgeProxy;
 namespace TestPerformance
 {
    // [Export(typeof(IPerformanceTest))]
-   public class TestOneMillionInts : IPerformanceTest
+   public class TestOneMillion : IPerformanceTest
    {
        public TestResult RunTest(IHaywireBridge sender)
        {
            const int loops = 1000000;
 
            Stopwatch sw = new Stopwatch();
-
-           String message = "I need coffee & a bagel";
-           sender.RaiseEvent(message, MessageType.Echo);//warm up
+           sender.RaiseEvent(-1);//warm up
 
            sw.Start();
            for (int i = 0; i < loops; i++)
            {
-               sender.RaiseEvent(message, MessageType.Echo);
+               sender.RaiseEvent(i);
            }
 
 
@@ -44,7 +42,9 @@ namespace TestPerformance
                TimeTaken = new TimeSpan(sw.ElapsedTicks),
                Transactions = loops
            };
-          
+           Console.WriteLine("{0} loops in {1}ms, {2:N0}/sec. -- Version: {3} -- {4:u}", loops,
+               sw.ElapsedMilliseconds, loops * TimeSpan.TicksPerSecond / (1.0 * sw.ElapsedTicks), version,
+               DateTime.Now);
 
 
        }

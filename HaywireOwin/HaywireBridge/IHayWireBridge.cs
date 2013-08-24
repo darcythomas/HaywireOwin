@@ -9,8 +9,9 @@ namespace MemoryMapBridgeProxy
     public interface IHaywireBridge : IDisposable
     {
         String FileName { get; }
-        void RaiseEvent(int request);
+        void RaiseEvent(int request);//TODO remove
+        void RaiseEvent(String request, MessageType messageType);
         void SubscribeToEvent(Action request);
-        Version Version();
+        Version Version { get; }
     }
 }

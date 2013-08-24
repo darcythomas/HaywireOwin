@@ -9,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Net.Configuration;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using MemoryMapBridgeProxy;
 using Newtonsoft.Json;
@@ -62,7 +63,13 @@ namespace TestPerformance
 
         public void RunTests()
         {
+            Mutex shutDownSynchMutex = new Mutex(true, "haywireShutDownSyncMutex");
+
             StartOtherSideOfTheBridge();
+
+            Console.WriteLine("Attach debugger now");
+            Console.ReadLine();
+
 
             //var q = performanceTests.Value;
             foreach (var performanceTest in performanceTests)
@@ -88,6 +95,7 @@ namespace TestPerformance
 
 
             Console.ReadLine();
+            shutDownSynchMutex.ReleaseMutex();
         }
 
         private void IncludeLastRunsData(TestResult result)
