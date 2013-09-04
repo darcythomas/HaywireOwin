@@ -23,6 +23,8 @@ Will work cross platform (*nix win osx)
 
 #####Simple to use:
 Painless deployment / installation etc
+Can hotswap application Dlls (seamless switchover)
+Web based admin console
 
 
 ##Current design/architecture/idea (Heavily subject to change)
