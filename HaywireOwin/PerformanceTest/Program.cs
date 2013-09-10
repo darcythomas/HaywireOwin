@@ -34,12 +34,12 @@ namespace TestPerformance
                 const int loops = 1000000;
 
                 Stopwatch sw = new Stopwatch();
-                Sender.AddToQueue(-1);//warm up
+                Sender.RaiseEvent(-1);//warm up
 
                 sw.Start();
                 for (int i = 0; i < loops; i++)
                 {
-                    Sender.AddToQueue(i);
+                    Sender.RaiseEvent(i);
                 }
 
 

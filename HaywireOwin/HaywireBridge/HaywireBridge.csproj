@@ -43,8 +43,14 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AssignProcessors.cs" />
+    <Compile Include="EventCaller.cs" />
+    <Compile Include="EventLoaderUnloader.cs" />
     <Compile Include="EventProcessor.cs" />
+    <Compile Include="EventSpinners.cs" />
     <Compile Include="HaywireBridge.cs" />
+    <Compile Include="HelperExtensions.cs" />
+    <Compile Include="IEventSpinners.cs" />
     <Compile Include="IHayWireBridge.cs" />
     <Compile Include="IMemoryManagmentFactory.cs" />
     <Compile Include="MemoryManagmentFactory.cs" />

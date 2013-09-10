@@ -30,18 +30,43 @@ namespace MemoryMapBridgeProxy
         private const String SystemWideMutexName = "HaywireMemoryMappedFileSetupMutex";
         public static readonly string DefaultMemorymappedFileName = "HaywireBridgeMemoryMap";
         private static readonly Mutex MemoryMapsetupMutex = new Mutex(false, SystemWideMutexName);
-        private readonly ConcurrentQueue<EventCaller> _eventsToSendQueue = new ConcurrentQueue<EventCaller>();
         private ConcurrentQueue<Object> _eventsRecievedQueue = new ConcurrentQueue<Object>();
-        private Thread _eventSpinnerThreadIn;
-        private Thread _eventSpinnerThreadOut;
-        private Boolean _eventSpinnerThreadsRunning = true;
-        private Action<EventCaller> processEventDelegate;
+
+        public Action<EventCaller> ProcessEventDelegate;
+        public Dictionary<MessageType, Action<EventCaller, MemoryMappedViewAccessor>> ProcessEventDelegates = new Dictionary<MessageType, Action<EventCaller, MemoryMappedViewAccessor>>();
+
+        public Action<String, MessageType> AddEventToQueueDelegate;
         public String FileName { get; private set; }
-        MemoryMappedFile _memoryMappedIn;
-        MemoryMappedFile _memoryMappedOut;
-        MemoryMappedFile _processorMappedFile;
-        private readonly long BridgeSize = 1024 * 4;
-        private MemoryMappedViewAccessor _processorViewAccessor;
+        internal MemoryMappedFile MemoryMappedIn;
+        internal MemoryMappedFile MemoryMappedOut;
+        internal MemoryMappedFile ProcessorMappedFile;
+        private const int BridgeSize = 1024 * 8;
+        public MemoryMappedViewAccessor _processorViewAccessor;
+        private MemoryMappedViewStream _processorViewStream;
+
+        //TODO rename parameters
+        public void SubscribeToEvent(Action<EventCaller, MemoryMappedViewAccessor> request, MessageType messageType)
+        {
+            if (ProcessEventDelegates.ContainsKey(messageType))
+            {
+                ProcessEventDelegates[messageType] = request;
+            }
+            else
+            {
+                ProcessEventDelegates.Add(messageType, request);
+            }
+        }
+
+        public Version Version { get { return MethodBase.GetCurrentMethod().DeclaringType.Assembly.GetName().Version; } }
+
+        public EventLoaderUnloader EventLoaderUnloader
+        {
+            get { return _eventLoaderUnloader; }
+        }
+
+        public MemoryManagmentFactory _memoryManagmentFactory;
+        private readonly EventSpinners _eventSpinners;
+        private readonly EventLoaderUnloader _eventLoaderUnloader;
 
 
         //Implement IOWIN
@@ -61,13 +86,16 @@ namespace MemoryMapBridgeProxy
             SetMemoryMappedFileName(fileName);
             SetupMemoryMappedFileSecurity(customSecurity);
             SetupMemoryMappedFiles(customSecurity);
-            StartEventspinners();
+            _eventLoaderUnloader = new EventLoaderUnloader(this);
+            _eventSpinners = new EventSpinners(this);
+            SetupAddEventToQueueDelegate();
+
         }
 
-
-        public Version Version { get { return MethodInfo.GetCurrentMethod().DeclaringType.Assembly.GetName().Version; } }
-
-
+        private void SetupAddEventToQueueDelegate()
+        {
+            AddEventToQueueDelegate = _eventLoaderUnloader.AddToQueue;
+        }
 
 
         private static void SetupMemoryMappedFileSecurity(MemoryMappedFileSecurity customSecurity)
@@ -89,42 +117,55 @@ namespace MemoryMapBridgeProxy
             MemoryMapsetupMutex.WaitOne();
             try
             {
-                _memoryMappedIn = MemoryMappedFile.CreateNew(FileName + "-MasterInSlaveOut", BridgeSize,
+                MemoryMappedIn = MemoryMappedFile.CreateNew(FileName + "-MasterInSlaveOut", BridgeSize,
                     MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.DelayAllocatePages, customSecurity,
                     HandleInheritability.Inheritable);
             }
             catch (Exception)
             {
-                _memoryMappedIn = MemoryMappedFile.CreateOrOpen(FileName + "-SlaveInMasterOut", BridgeSize,
+                MemoryMappedIn = MemoryMappedFile.CreateOrOpen(FileName + "-SlaveInMasterOut", BridgeSize,
                     MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.DelayAllocatePages, customSecurity,
                     HandleInheritability.Inheritable);
             }
 
             try
             {
-                _memoryMappedOut = MemoryMappedFile.CreateNew(FileName + "-SlaveInMasterOut", BridgeSize,
+                MemoryMappedOut = MemoryMappedFile.CreateNew(FileName + "-SlaveInMasterOut", BridgeSize,
                     MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.DelayAllocatePages, customSecurity,
                     HandleInheritability.Inheritable);
             }
             catch (Exception)
             {
-                _memoryMappedOut = MemoryMappedFile.CreateOrOpen(FileName + "-MasterInSlaveOut", BridgeSize,
+                MemoryMappedOut = MemoryMappedFile.CreateOrOpen(FileName + "-MasterInSlaveOut", BridgeSize,
                     MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.DelayAllocatePages, customSecurity,
                     HandleInheritability.Inheritable);
             }
 
 
-            //TODO this tempory replace later
-            _processorMappedFile = MemoryMappedFile.CreateOrOpen(FileName + "-Processor", BridgeSize,
+            //TODO this tempory replace later Or make sure it is disposed properly
+            ProcessorMappedFile = MemoryMappedFile.CreateOrOpen(FileName + "-Processor", BridgeSize,
                    MemoryMappedFileAccess.ReadWrite, MemoryMappedFileOptions.DelayAllocatePages, customSecurity,
                    HandleInheritability.Inheritable);
 
-            _processorViewAccessor = _processorMappedFile.CreateViewAccessor();
+
+            _processorViewAccessor = ProcessorMappedFile.CreateViewAccessor();
+            //  _processorViewStream = _processorMappedFile.CreateViewStream(BridgeSize,BridgeSize);
+            _memoryManagmentFactory = new MemoryManagmentFactory(BridgeSize);
+
+
             MemoryMapsetupMutex.ReleaseMutex();
         }
 
+
+
+
         private void SetDefaultIncomingEventProcessor(HaywireStartUpMode mode)
         {
+
+            ProcessEventDelegate = SubscribedProcessIncomingEvent;
+            ProcessEventDelegates.Add(MessageType.Default, ProcessIncomingEventDoNothing);
+            return;
+
 
             //TODO Change this to use MEF to load processors
 
@@ -133,17 +174,17 @@ namespace MemoryMapBridgeProxy
                 case HaywireStartUpMode.Default:
 #if (DEBUG)
                     //If a debug release then use the debug processor, otherwise fall through and use the normal one
-                    processEventDelegate = this.DebugProcessIncomingEvent;
+                    ProcessEventDelegate = DebugProcessIncomingEvent;
                     break;
 #endif
                 case HaywireStartUpMode.Normal:
-                    processEventDelegate = this.NormalProcessIncomingEvent;
+                    ProcessEventDelegate = NormalProcessIncomingEvent;
                     break;
                 case HaywireStartUpMode.Debug:
-                    processEventDelegate = this.DebugProcessIncomingEvent;
+                    ProcessEventDelegate = DebugProcessIncomingEvent;
                     break;
                 case HaywireStartUpMode.PerformanceTest:
-                    processEventDelegate = this.PerformanceTestProcessIncomingEvent;
+                    ProcessEventDelegate = PerformanceTestProcessIncomingEvent;
                     break;
             }
 
@@ -154,39 +195,52 @@ namespace MemoryMapBridgeProxy
             throw new NotImplementedException();
         }
 
-        private void PerformanceTestProcessIncomingEventDoNothing(EventCaller obj)
+        private void ProcessIncomingEventDoNothing(EventCaller eventCaller, MemoryMappedViewAccessor accessor)
         {
             //Do Nothing
         }
+        private void SubscribedProcessIncomingEvent(EventCaller obj)
+        {
+            ProcessEventDelegates[(MessageType)obj.MessageType].Invoke(obj, _processorViewAccessor);
+        }
 
-        private void PerformanceTestProcessIncomingEvent(EventCaller obj)
+        private void PerformanceTestProcessIncomingEvent(EventCaller eventObject)
         {
             //decide what to do based on message type
-           
-            if (obj.MessageType % 2 == 0)
+
+            if (eventObject.MessageType % 2 == 0)
             {
                 //is a response; ignore
+                if (eventObject.MessageType != 0)
+                {
+                    _memoryManagmentFactory.ReturnAllocation(new MemoryAllocation(eventObject));
+
+                }
+
+                //TODO memory pool release 
             }
             else
             {
-                MessageType messageType = (MessageType)obj.MessageType;
+                MessageType messageType = (MessageType)eventObject.MessageType;
                 switch (messageType)
                 {
                     case MessageType.Echo:
-                       Byte[] data = new byte[obj.Length];
-                        _processorViewAccessor.ReadArray(obj.OffsetPosition, data, 0, obj.Length);
-                        String message = GetString(data);
+                        Byte[] data = new byte[eventObject.MessageLength];
+                        _processorViewAccessor.ReadArray(eventObject.OffsetPosition, data, 0, eventObject.MessageLength);
+                        _memoryManagmentFactory.ReturnAllocation(new MemoryAllocation(eventObject));
+
+                        String message = data.GetString();
                         Console.WriteLine(message);
-                        AddToQueue(message, MessageType.EchoReply);
+
+                        RaiseEvent(message, MessageType.EchoReply);
                         break;
 
 
                     case MessageType.Default:
                     default:
-
                         //ignore
+
                         break;
-                        ;
                 }
             }
 
@@ -200,163 +254,56 @@ namespace MemoryMapBridgeProxy
 
         public MemoryMappedViewAccessor GetInAccessor()
         {
-            return _memoryMappedIn.CreateViewAccessor();
+            return MemoryMappedIn.CreateViewAccessor();
         }
         public MemoryMappedViewAccessor GetOutAccessor()
         {
-            return _memoryMappedOut.CreateViewAccessor();
+            return MemoryMappedOut.CreateViewAccessor();
         }
 
-        public void AddToQueue(int item)
-        {
-            EventCaller eventItem = new EventCaller { Length = 0, MessageCounter = item, MessageType = 1, OffsetPosition = 4 * 4 };
+        //private void AddToQueue(int item)
+        //{
+        //    EventCaller eventItem = new EventCaller { MessageLength = 0, MessageCounter = item, MessageType = 1, OffsetPosition = 4 * 4 };
 
-            _eventsToSendQueue.Enqueue(eventItem);
-        }
+        //    EventsToSendQueue.Enqueue(eventItem);
+        //}
 
-        public void AddToQueue(String item, MessageType messageType)
-        {
 
-            //try basic only add one item to be processed at a time
-            var q = GetBytes(item);
-            int length = q.Length;
 
-            int offset = 0;
-            _processorViewAccessor.WriteArray(0,q,offset,length);
-            EventCaller eventItem = new EventCaller { Length = length, MessageType = (int)messageType, OffsetPosition = offset };
 
-            _eventsToSendQueue.Enqueue(eventItem);
-        }
-
+        [Obsolete]
         public void RaiseEvent(int request)
         {
-            AddToQueue(request);
+            RaiseEvent(request.ToString("F0"), MessageType.Echo);
         }
+
         public void RaiseEvent(String request, MessageType messagetype)
         {
-            AddToQueue(request, messagetype);
-        }
-        public void SubscribeToEvent(Action request)
-        {
-
-
+            AddEventToQueueDelegate(request, messagetype);
         }
 
-        private void EventspinnerOut()
-        {
-            using (var viewAccessor = GetOutAccessor())
-            {
-                bool ackd = true;
 
-                viewAccessor.Write(sizeof(Int32) * 3, true);
-                while (this._eventSpinnerThreadsRunning)
-                {
-                    //check if anything in outgoing queue
-                    //check if last message was processed
-                    //if processed write new item to queue
-
-
-                    //HINT: try writing to a set of slots not just one, may be more efficient with thread time slicing
-                    if (ackd)
-                    {
-                        EventCaller q;
-                        if (!_eventsToSendQueue.TryDequeue(out q)) continue;
-                        viewAccessor.Write(0, ref q);
-                        ackd = false;
-                    }
-                    else
-                    {
-                        viewAccessor.Read(0, out ackd);
-
-                        if (ackd) continue;
-                        Thread.Yield(); //Release thread slice so that we don't consume 100% of a core
-                    }
-                }
-            }
-        }
-        private void EventspinnerIn()
-        {
-            using (var viewAccessor = GetInAccessor())
-            {
-                while (_eventSpinnerThreadsRunning)
-                {
-                    //check if anything in outgoing queue
-                    //check if last message was processed
-                    //if processed write new item to queue
-
-                    EventCaller eventItem;
-
-                    viewAccessor.Read(0, out eventItem);
-                    if (eventItem.ACK)
-                    {
-                        Thread.Yield();
-                        continue;
-                    }
-
-                    //TODO make this non blocking, and add events to queue to be processed
-                    processEventDelegate(eventItem);
-
-                    //Write ack
-                    viewAccessor.Write(0, true);
-                }
-            }
-        }
 
         private void DebugProcessIncomingEvent(EventCaller q)
         {
-
             Console.WriteLine(q.MessageCounter);
         }
 
-        private void StartEventspinners()
-        {
-            _eventSpinnerThreadIn = new Thread(EventspinnerIn);
-            _eventSpinnerThreadIn.Start();
-            _eventSpinnerThreadOut = new Thread(EventspinnerOut);
-            _eventSpinnerThreadOut.Start();
-        }
 
-        private struct EventCaller
-        {
-            public Boolean ACK;
-            public int MessageCounter;//may not need this
-            public int MessageType; //TODO define Messages types in a enum
-            public long OffsetPosition;
-            public int Length;
-        }
-
-
-
-        static byte[] GetBytes(String str)
-        {
-            byte[] bytes = new byte[str.Length * sizeof(char)];
-            Buffer.BlockCopy(str.ToCharArray(), 0, bytes, 0, bytes.Length);
-            return bytes;
-        }
-
-        static string GetString(byte[] bytes)
-        {
-            char[] chars = new char[bytes.Length / sizeof(char)];
-            Buffer.BlockCopy(bytes, 0, chars, 0, bytes.Length);
-            return new string(chars);
-        }
 
 
         public void Dispose()
         {
-            _eventSpinnerThreadsRunning = false;
+            _eventSpinners.Dispose();
 
-            _eventSpinnerThreadIn.Join(500);
-            _eventSpinnerThreadOut.Join(500);
-
-            if (_memoryMappedIn != null)
+            if (MemoryMappedIn != null)
             {
-                _memoryMappedIn.Dispose();
+                MemoryMappedIn.Dispose();
             }
 
-            if (_memoryMappedOut != null)
+            if (MemoryMappedOut != null)
             {
-                _memoryMappedOut.Dispose();
+                MemoryMappedOut.Dispose();
             }
         }
     }

@@ -17,6 +17,8 @@ namespace MemoryMapBridgeProxy
        HeartBeat = 1,
        HeartBeatReply = 2,
        Echo = 3,
-       EchoReply = 4
+       EchoReply = 4,
+       TestRequest = 5,
+       TestResponce = 6
     }
 }
